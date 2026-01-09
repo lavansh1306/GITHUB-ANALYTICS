@@ -18,6 +18,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         await loadOrganizations();
         await loadCopilotUsage();
 
+        // Full data button
+        const loadFullBtn = document.getElementById('loadFullData');
+        if (loadFullBtn) loadFullBtn.addEventListener('click', loadFullData);
+
     } catch (error) {
         console.error('Error loading dashboard:', error);
         showError('Failed to load dashboard data');
@@ -228,5 +232,52 @@ async function saveCopilotData() {
     } catch (error) {
         console.error('Error saving Copilot data:', error);
         alert('Error saving data');
+    }
+}
+
+// Load full GitHub data and show summary + raw JSON
+async function loadFullData() {
+    const status = document.getElementById('fullDataStatus');
+    const viewer = document.getElementById('fullDataViewer');
+    const summary = document.getElementById('fullDataSummary');
+    const raw = document.getElementById('fullDataRaw');
+
+    try {
+        status.textContent = 'Fetching... this can take a while';
+        const resp = await fetch('/api/full');
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            status.textContent = `Error: ${err.error || resp.status}`;
+            return;
+        }
+
+        const data = await resp.json();
+        status.textContent = `Loaded: ${data.repos?.length || 0} repos, ${data.repoDetails?.length || 0} detailed repos`;
+        viewer.style.display = 'block';
+
+        // Build short summary
+        const lines = [];
+        lines.push(`<strong>User:</strong> ${data.user?.login || 'N/A'}`);
+        lines.push(`<strong>Orgs:</strong> ${data.orgs?.length || 0}`);
+        lines.push(`<strong>Gists:</strong> ${data.gists?.length || 0}`);
+        lines.push(`<strong>Followers:</strong> ${data.followers?.length || 0}`);
+        lines.push(`<strong>Following:</strong> ${data.following?.length || 0}`);
+        lines.push(`<strong>Repos:</strong> ${data.repos?.length || 0}`);
+        lines.push(`<strong>Events (recent):</strong> ${data.events?.length || 0}`);
+        lines.push(`<strong>Repo details fetched:</strong> ${data.repoDetails?.length || 0}`);
+
+        // Top languages across repos (simple tally)
+        const langCounts = {};
+        (data.repos || []).forEach(r => { if (r.language) langCounts[r.language] = (langCounts[r.language] || 0) + 1; });
+        const topLang = Object.entries(langCounts).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([l,c])=>`${l}(${c})`).join(', ');
+        lines.push(`<strong>Top languages:</strong> ${topLang || 'N/A'}`);
+
+        summary.innerHTML = lines.join('<br/>');
+        raw.textContent = JSON.stringify(data, null, 2);
+
+        // toggle raw
+        document.getElementById('toggleRaw').onclick = () => { raw.style.display = raw.style.display === 'none' ? 'block' : 'none'; };
+    } catch (e) {
+        status.textContent = `Failed: ${e.message}`;
     }
 }

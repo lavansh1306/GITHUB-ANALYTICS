@@ -65,6 +65,20 @@
             </div>
 
             <div class="section">
+                <h2>🔎 Full GitHub Data</h2>
+                <p class="section-desc">Fetch everything the GitHub API can return for your account (may take time and hit rate limits).</p>
+                <div style="display:flex;gap:12px;align-items:center;">
+                    <button id="loadFullData" class="btn btn-primary">Load Full Data</button>
+                    <span id="fullDataStatus" style="color:#9aa4b2"></span>
+                </div>
+                <div id="fullDataViewer" style="margin-top:12px;display:none;">
+                    <button id="toggleRaw" class="btn">Toggle Raw JSON</button>
+                    <div id="fullDataSummary" style="margin-top:12px;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:12px;color:#cbd5e1;max-height:320px;overflow:auto;"></div>
+                    <pre id="fullDataRaw" style="display:none;margin-top:12px;background:#05070a;color:#cbd5e1;padding:12px;border-radius:6px;max-height:420px;overflow:auto;"></pre>
+                </div>
+            </div>
+
+            <div class="section">
                 <h2>🤖 Copilot Usage Tracker</h2>
                 <p class="section-desc">Manually track your actual Copilot usage and interactions</p>
                 

@@ -262,6 +262,139 @@ app.get('/api/orgs', async (req, res) => {
     }
 });
 
+// Helper: fetch all paginated pages for a given GitHub API URL
+async function fetchAllPages(url, headers = {}) {
+    const perPage = 100;
+    let page = 1;
+    let results = [];
+
+    while (true) {
+        const resp = await axios.get(`${url}${url.includes('?') ? '&' : '?'}per_page=${perPage}&page=${page}`, { headers });
+        if (!Array.isArray(resp.data)) break;
+        results = results.concat(resp.data);
+        if (resp.data.length < perPage) break;
+        page += 1;
+        // small delay to avoid bursting rate limits
+        await new Promise(r => setTimeout(r, 100));
+    }
+
+    return results;
+}
+
+// Helper: fetch additional details for a single repo (limited depth)
+async function fetchRepoDetails(repo, token) {
+    const headers = { Authorization: `token ${token}`, Accept: 'application/vnd.github+json' };
+    const details = {
+        name: repo.name,
+        full_name: repo.full_name,
+        private: repo.private,
+        fork: repo.fork,
+        html_url: repo.html_url,
+        description: repo.description,
+        language: repo.language,
+        topics: [],
+        languages: {},
+        branches: [],
+        contributors: [],
+        pulls: [],
+        commits: [],
+        issues: []
+    };
+
+    try {
+        const [langsResp, topicsResp] = await Promise.all([
+            axios.get(`https://api.github.com/repos/${repo.full_name}/languages`, { headers }).catch(() => ({ data: {} })),
+            axios.get(`https://api.github.com/repos/${repo.full_name}/topics`, { headers }).catch(() => ({ data: { names: [] } }))
+        ]);
+        details.languages = langsResp.data || {};
+        details.topics = topicsResp.data.names || [];
+
+        // branches
+        const branchesResp = await axios.get(`https://api.github.com/repos/${repo.full_name}/branches?per_page=100`, { headers }).catch(() => ({ data: [] }));
+        details.branches = branchesResp.data.map(b => ({ name: b.name, protected: b.protected }));
+
+        // contributors (first page)
+        const contributorsResp = await axios.get(`https://api.github.com/repos/${repo.full_name}/contributors?per_page=100`, { headers }).catch(() => ({ data: [] }));
+        details.contributors = contributorsResp.data.map(c => ({ login: c.login, contributions: c.contributions }));
+
+        // pulls (open + closed recent)
+        const pullsResp = await axios.get(`https://api.github.com/repos/${repo.full_name}/pulls?state=all&per_page=50`, { headers }).catch(() => ({ data: [] }));
+        details.pulls = pullsResp.data.map(p => ({ number: p.number, state: p.state, merged_at: p.merged_at, user: p.user?.login }));
+
+        // commits (limit to recent 100)
+        const commitsResp = await axios.get(`https://api.github.com/repos/${repo.full_name}/commits?per_page=100`, { headers }).catch(() => ({ data: [] }));
+        details.commits = commitsResp.data.map(c => ({ sha: c.sha, author: c.author?.login, commit: c.commit }));
+
+        // issues (first 100)
+        const issuesResp = await axios.get(`https://api.github.com/repos/${repo.full_name}/issues?state=all&per_page=100`, { headers }).catch(() => ({ data: [] }));
+        // filter out PRs which are returned in issues endpoint
+        details.issues = issuesResp.data.filter(i => !i.pull_request).map(i => ({ number: i.number, state: i.state, title: i.title, user: i.user?.login }));
+    } catch (e) {
+        // swallow repo-level errors to continue overall fetch
+        console.log(`Repo details error for ${repo.full_name}: ${e.message}`);
+    }
+
+    return details;
+}
+
+// Get full GitHub data (as much as practical)
+app.get('/api/full', async (req, res) => {
+    if (!req.session.accessToken) return res.status(401).json({ error: 'Not authenticated' });
+
+    const token = req.session.accessToken;
+    const headers = { Authorization: `token ${token}`, Accept: 'application/vnd.github+json' };
+
+    try {
+        // Parallel top-level requests
+        const userPromise = axios.get('https://api.github.com/user', { headers }).catch(() => null);
+        const orgsPromise = axios.get('https://api.github.com/user/orgs', { headers }).catch(() => ({ data: [] }));
+        const gistsPromise = axios.get('https://api.github.com/gists', { headers }).catch(() => ({ data: [] }));
+        const starredPromise = axios.get('https://api.github.com/user/starred?per_page=100', { headers }).catch(() => ({ data: [] }));
+        const followersPromise = axios.get('https://api.github.com/user/followers?per_page=100', { headers }).catch(() => ({ data: [] }));
+        const followingPromise = axios.get('https://api.github.com/user/following?per_page=100', { headers }).catch(() => ({ data: [] }));
+
+        const [userResp, orgsResp, gistsResp, starredResp, followersResp, followingResp] = await Promise.all([
+            userPromise, orgsPromise, gistsPromise, starredPromise, followersPromise, followingPromise
+        ]);
+
+        const user = userResp?.data || req.session.user || null;
+
+        // fetch all repos (can be many) - use helper
+        const allRepos = await fetchAllPages('https://api.github.com/user/repos', headers);
+
+        // fetch events (recent) up to 300
+        const events = await fetchAllPages(`https://api.github.com/users/${user.login}/events`, headers).catch(() => []);
+
+        // fetch repo-level details in batches to avoid rate limits
+        const repoDetails = [];
+        const batchSize = 5;
+        for (let i = 0; i < allRepos.length; i += batchSize) {
+            const batch = allRepos.slice(i, i + batchSize);
+            const promises = batch.map(r => fetchRepoDetails(r, token));
+            // wait for batch to complete
+            const results = await Promise.all(promises);
+            repoDetails.push(...results);
+            // small pause between batches
+            await new Promise(r => setTimeout(r, 200));
+        }
+
+        res.json({
+            user,
+            orgs: orgsResp.data || [],
+            gists: gistsResp.data || [],
+            starred: starredResp.data || [],
+            followers: followersResp.data || [],
+            following: followingResp.data || [],
+            repos: allRepos,
+            repoDetails,
+            events
+        });
+    } catch (error) {
+        console.error('Full data fetch error:', error.message);
+        res.status(500).json({ error: 'Failed to fetch full GitHub data', details: error.message });
+    }
+});
+
 // Save Copilot usage data
 app.post('/api/copilot/usage', (req, res) => {
     if (!req.session.user) {
