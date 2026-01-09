@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Load dashboard data
         await loadDashboardData();
         await loadOrganizations();
+        await loadCopilotUsage();
 
     } catch (error) {
         console.error('Error loading dashboard:', error);
@@ -169,4 +170,63 @@ function showError(message) {
         <p class="error">${message}</p>
         <a href="/" class="btn btn-primary">Go Back</a>
     `;
+}
+
+async function loadCopilotUsage() {
+    try {
+        const response = await fetch('/api/copilot/usage');
+        const data = await response.json();
+
+        // Display Copilot stats
+        document.getElementById('acceptedCount').textContent = data.completionsAccepted;
+        document.getElementById('rejectedCount').textContent = data.completionsRejected;
+        document.getElementById('acceptanceRate').textContent = data.acceptanceRate + '%';
+        document.getElementById('copilotLineCount').textContent = formatNumber(data.linesGenerated);
+
+        // Always show the stats grid
+        document.getElementById('copilotStats').style.display = 'grid';
+
+        // Add save button listener
+        document.getElementById('saveCopilotData').addEventListener('click', saveCopilotData);
+    } catch (error) {
+        console.error('Error loading Copilot usage:', error);
+    }
+}
+
+async function saveCopilotData() {
+    const completionsAccepted = document.getElementById('copilotCompletions').value;
+    const completionsRejected = document.getElementById('copilotRejections').value;
+    const linesGenerated = document.getElementById('copilotLinesGenerated').value;
+
+    if (!completionsAccepted && !completionsRejected && !linesGenerated) {
+        alert('Please enter at least one value');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/copilot/usage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                completionsAccepted,
+                completionsRejected,
+                linesGenerated
+            })
+        });
+
+        if (response.ok) {
+            // Reload Copilot data
+            await loadCopilotUsage();
+            // Clear inputs
+            document.getElementById('copilotCompletions').value = '';
+            document.getElementById('copilotRejections').value = '';
+            document.getElementById('copilotLinesGenerated').value = '';
+            alert('Copilot data saved!');
+        } else {
+            alert('Failed to save data');
+        }
+    } catch (error) {
+        console.error('Error saving Copilot data:', error);
+        alert('Error saving data');
+    }
 }

@@ -8,6 +8,9 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// In-memory storage for Copilot data (in production, use a database)
+const copilotData = {};
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -257,6 +260,48 @@ app.get('/api/orgs', async (req, res) => {
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch organizations' });
     }
+});
+
+// Save Copilot usage data
+app.post('/api/copilot/usage', (req, res) => {
+    if (!req.session.user) {
+        return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const { completionsAccepted, completionsRejected, linesGenerated } = req.body;
+    const userId = req.session.user.login;
+
+    copilotData[userId] = {
+        completionsAccepted: parseInt(completionsAccepted) || 0,
+        completionsRejected: parseInt(completionsRejected) || 0,
+        linesGenerated: parseInt(linesGenerated) || 0,
+        lastUpdated: new Date().toISOString()
+    };
+
+    res.json(copilotData[userId]);
+});
+
+// Get Copilot usage data
+app.get('/api/copilot/usage', (req, res) => {
+    if (!req.session.user) {
+        return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const userId = req.session.user.login;
+    const data = copilotData[userId] || {
+        completionsAccepted: 0,
+        completionsRejected: 0,
+        linesGenerated: 0,
+        lastUpdated: null
+    };
+
+    const total = data.completionsAccepted + data.completionsRejected;
+    const acceptanceRate = total > 0 ? ((data.completionsAccepted / total) * 100).toFixed(1) : 0;
+
+    res.json({
+        ...data,
+        acceptanceRate
+    });
 });
 
 // Start server
