@@ -109,14 +109,12 @@ copilot-metrics-app/
 
 ## Production Deployment
 
-For production, update:
+For production, update
 
 1. `CALLBACK_URL` to your production URL
 2. Set `cookie.secure: true` in session config
 3. Use environment variables for secrets
 4. Consider using a database for session storage
 
-## License
 
-MIT
 # GITHUB-ANALYTICS
